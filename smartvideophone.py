@@ -136,6 +136,42 @@ deck_the_halls_tempo = [
     2, 2, 2, 2,
 ]
 
+## tcp/ip 소켓 생성
+# 접속할 서버 주소
+#HOST ='192.168.0.110' # or loopback addr
+HOST ='192.168.219.104' # or loopback addr
+
+# 클라이언트 접속을 대기하는 포트 번호
+PORT = 8000
+
+# 주소 체계로 IPv4, 소켓 타입으로 TCP 사용
+serverSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# 포트 사용중이라 연결할 수 없다는 winError 10048 에러 해결을 위해 필요
+serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+# 네트워크 인터페이스와 포트 번호에 소켓을 바인딩
+serverSock.bind((HOST, PORT))
+
+
+# 안드로이드 스레드들 관리
+threads = []
+
+# tcp_client..server와 networking
+clientSock_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#clientSock_server.connect(("192.168.0.111",8000))
+clientSock_server.connect(("192.168.219.107",8000))
+buttonClicked = False
+
+GPIO.setwarnings(False) # Ignore warning for now
+GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
+GPIO.setup(10, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input pin and set initial value to be pulled low(off)
+GPIO.setup(29,GPIO.OUT)
+GPIO.setup(31,GPIO.IN)
+GPIO.output(29,GPIO.LOW)
+buzzer=16
+GPIO.setup(buzzer,GPIO.OUT)
+
 def run_quickstart(str):
     # [START tts_quickstart]
     """Synthesizes speech from the input string of text or ssml.
@@ -171,11 +207,33 @@ def run_quickstart(str):
         out.write(response.audio_content)
         print('Audio content written to file "output.mp3"')
     # [END tts_quickstart]
+def getdistance():
+    pulse_start = pulse_end = None
+    
+    GPIO.output(29,False)         
+    time.sleep(0.5)
+    GPIO.output(29,True)
+    time.sleep(0.00001)
+    
+    GPIO.output(29,False)
+    
+    while GPIO.input(31)==0:
+        pulse_start=time.time()
+        
+        
+    while GPIO.input(31)==1:
+        pulse_end=time.time()
 
+    pulse_duration=pulse_end-pulse_start
+    distance=pulse_duration*17000
+    distance=round(distance,2)
+    
+    return distance
+    
 def insertDB():
-    conn = pymysql.connect(host='192.168.219.106',
-        user='raspberrypi',
-        password='1234',
+    conn = pymysql.connect(host='192.168.219.107',
+        user='%',#'raspberrypi',
+        password='',#'1234',
         db='smartvideophone',
         charset='utf8mb4')
     response = requests.get("http://192.168.219.104:8090/?action=snapshot")
@@ -191,14 +249,39 @@ def insertDB():
         # 1 (last insert id)
     finally:
         conn.close()
+        
+def requestInsert():
+    global clientSock_server
+    try:
+        msg = "triggered"
+        clientSock_server.sendall(msg.encode("utf-8"))
+    except socket.error, e:
+        print("checkkk")
+        if isinstance(e.args, tuple):
+            print("error no is %d"%e[0])
+        else:
+            print("socket error", e)
+        clientSock_server.close()
+        clientSock_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #clientSock_server.connect(("192.168.0.111",8000))
+        clientSock_server.connect(("192.168.219.107",8000))
+        
+    #clientSock_server.close()
+    
 def button_callback(channel):
     print("Button was pushed!")
     # buzerRR
-    play(deck_the_halls_melody, deck_the_halls_tempo, 0.30, 0.800)
-    th = threading.Thread(target=insertDB)
-    th.start()
-    th.join()
-    time.sleep(2)
+    #play(deck_the_halls_melody, deck_the_halls_tempo, 0.30, 0.800)
+    #th = threading.Thread(target=insertDB)
+    #th.start()
+    #th.join()
+    #th = threading.Thread(target=requestInsert)
+    #th.start()
+    #th.join()
+    #clientSock_server.send("triggered".encode("utf-8"))
+    global buttonClicked
+    buttonClicked = True
+    #time.sleep(5)
     #destroy()
     
     # tts "who is this?"
@@ -236,36 +319,44 @@ def play(melody,tempo,pause,pace=0.800):
         time.sleep(pauseBetweenNotes)
         
 def trigger():
+    global buttonClicked
     GPIO.add_event_detect(10,GPIO.RISING,callback=button_callback) # Setup event on pin 10 rising edge
+    while True:
+        result = getdistance()
+        print("distance: ",result,"cm")
+        print(buttonClicked)
+        if (buttonClicked or result<30):
+            print("trigger!")
+            if buttonClicked or result>=30:
+                play(deck_the_halls_melody, deck_the_halls_tempo, 0.30, 0.800)
+            #clientSock_server.send("triggered".encode("utf-8"))
+            th = threading.Thread(target=requestInsert)
+            th.start()
+            th.join()
+            
+            buttonClicked = False
+        time.sleep(3)
+        
 
-## tcp/ip 소켓 생성
-# 접속할 서버 주소
-HOST ='192.168.219.104' # or loopback addr
+def detectSensor():
+    
+    while True:
+        
+        result=getdistance()
+        print("distance: ",result,"cm")
 
-# 클라이언트 접속을 대기하는 포트 번호
-PORT = 8080
-
-# 주소 체계로 IPv4, 소켓 타입으로 TCP 사용
-serverSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-# 포트 사용중이라 연결할 수 없다는 winError 10048 에러 해결을 위해 필요
-serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-# 네트워크 인터페이스와 포트 번호에 소켓을 바인딩
-serverSock.bind((HOST, PORT))
-
-# 안드로이드 스레드들 관리
-threads = []
-
-
-GPIO.setwarnings(False) # Ignore warning for now
-GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
-GPIO.setup(10, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input pin and set initial value to be pulled low(off)
-buzzer=16
-GPIO.setup(buzzer,GPIO.OUT)
+        if result<30 and result >=3:     #4.지정한 범위 내의 물체가 들어오면 multi-thread메소드를 통해 영상스트리밍함수,메시지 전달 함수를 실행한다.
+            print("distance: ",result,"cm")
+            clientSock_server.send("triggered".encode("utf-8"))
+            #th = threading.Thread(target=requestInsert)
+            #th.start()
+            #th.join()
+            
+            time.sleep(10)
 th = threading.Thread(target=trigger)
 th.start()
-
+#th2 = threading.Thread(target=detectSensor)
+#th2.start()
 
 while True:
     # 서버가 클라이언트의 접속을 허용하도록_최대 4명까지
@@ -282,3 +373,4 @@ while True:
 #msg = input("Press Enter to Quit")
 
 GPIO.cleanup()
+clientSock_server.close()
